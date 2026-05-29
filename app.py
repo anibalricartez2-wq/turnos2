@@ -62,7 +62,7 @@ mes, anio = fecha_sel.month, fecha_sel.year
 
 with st.sidebar:
     st.header("⚙️ Configuración")
-    limite = st.number_input("Límite Horas", min_value=0, max_value=500, value=130)
+    limite = st.number_input("Límite Horas", min_value=0, value=130)
     nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
     config = {}
     for nom in nombres:
@@ -86,7 +86,19 @@ if st.sidebar.button("📊 Calcular Turnos"):
         f = date(anio, mes, d)
         for t in ['M', 'T']:
             cands = [a for a in agentes.values() if a.horas + 9 <= a.lim and d not in a.bloqueos and (t=='M' and f.weekday() in a.disp_m or t=='T' and f.weekday() in a.disp_t)]
-            if not cands: cands = list(agentes.values())
+            if not cands:
+                cands = list(agentes.values())
             cands.sort(key=lambda x: criterio_sort(x, t, d))
-            el = cands[0]
-            grilla[f][t] = el.
+            
+            seleccionado = cands[0]
+            grilla[f][t] = seleccionado.nombre
+            seleccionado.horas += 9
+            seleccionado.conteo[t] += 1
+    
+    st.session_state.update({"grilla": pd.DataFrame(grilla).T, "resumen": pd.DataFrame({n: {'Turnos M': a.conteo['M'], 'Turnos T': a.conteo['T']} for n, a in agentes.items()}).T, "calculado": True})
+    st.rerun()
+
+if st.session_state.get("calculado"):
+    st.table(st.session_state.grilla)
+    st.table(st.session_state.resumen)
+    st.download_button("📥 Descargar PDF", data=generar_pdf(st.session_state.grilla, st.session_state.resumen, mes, anio), file_name="cronograma.pdf", mime="application/pdf")
