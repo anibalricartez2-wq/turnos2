@@ -42,10 +42,8 @@ def generar_pdf(df, resumen, limite, mes, anio):
     try: pdf.image('logo_smn.png', 10, 8, 20)
     except: pass
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"Cronograma {mes}/{anio} (Limite: {limite}hs)", ln=True, align="C")
+    pdf.cell(0, 10, f"Cronograma {mes}/{anio}", ln=True, align="C")
     pdf.ln(10)
-    
-    # Tabla Principal
     pdf.set_font("Arial", "B", 8)
     for col in ["Fecha", "Dia", "Manana", "Tarde"]:
         pdf.cell(45, 7, col, 1, 0, 'C')
@@ -56,29 +54,11 @@ def generar_pdf(df, resumen, limite, mes, anio):
         pdf.cell(45, 7, str(row['Dia']), 1)
         pdf.cell(45, 7, str(row['M']), 1)
         pdf.cell(45, 7, str(row['T']), 1, ln=True)
-        
-    # Tabla Resumen
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Resumen de Turnos por Agente", ln=True)
-    pdf.ln(5)
-    pdf.set_font("Arial", "B", 10)
-    for col in ["Agente", "Horas", "Turnos M", "Turnos T"]:
-        pdf.cell(45, 7, col, 1)
-    pdf.ln()
-    pdf.set_font("Arial", "", 10)
-    for n, row in resumen.iterrows():
-        pdf.cell(45, 7, str(n), 1)
-        pdf.cell(45, 7, str(row['Horas']), 1)
-        pdf.cell(45, 7, str(row['Turnos M']), 1)
-        pdf.cell(45, 7, str(row['Turnos T']), 1, ln=True)
-        
     buffer = BytesIO()
     buffer.write(pdf.output())
     buffer.seek(0)
     return buffer
 
-# --- UI ---
 st.title("🗓️ Planificador de Turnos SMN")
 nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
 lista_dias = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
@@ -86,4 +66,43 @@ config = {}
 
 st.sidebar.header("⚙️ Configuración")
 mes = st.sidebar.slider("Mes", 1, 12, 6)
-limite_input = st.sidebar.number_input("Límite Horas Mensuales", min_value=80, max_value
+limite_input = st.sidebar.number_input("Límite Horas Mensuales", min_value=80, max_value=200, value=130)
+
+for nom in nombres:
+    with st.sidebar.expander(f"Agente: {nom}"):
+        config[nom] = {
+            'dm': st.multiselect("Mañana", lista_dias, default=lista_dias, key=f"m_{nom}"),
+            'dt': st.multiselect("Tarde", lista_dias, default=lista_dias, key=f"t_{nom}"),
+            'pm': st.multiselect("Pref. Mañana", list(range(1, 32)), key=f"pm_{nom}"),
+            'pt': st.multiselect("Pref. Tarde", list(range(1, 32)), key=f"pt_{nom}"),
+            'bloq': st.text_input("Bloqueos", key=f"b_{nom}")
+        }
+
+if st.sidebar.button("📊 Calcular Turnos"):
+    agentes = {n: Agente(n, limite_input) for n in nombres}
+    for n, c in config.items():
+        agentes[n].configurar(c['dm'], c['dt'], c['pm'], c['pt'])
+        if c['bloq']:
+            for d in c['bloq'].split(','): 
+                if d.strip().isdigit(): agentes[n].bloqueos.add(date(2026, mes, int(d.strip())))
+    
+    _, dias_mes = calendar.monthrange(2026, mes)
+    grilla = {date(2026, mes, d): {'Dia': lista_dias[date(2026, mes, d).weekday()], 'M': 'SIN CUBRIR', 'T': 'SIN CUBRIR'} for d in range(1, dias_mes + 1)}
+        
+    for d in range(1, dias_mes + 1):
+        f = date(2026, mes, d)
+        for t in ['M', 'T']:
+            cands = [a for a in agentes.values() if a.esta_disponible(f, t, grilla)]
+            if cands:
+                cands.sort(key=lambda x: (0 if (t == 'M' and d in x.pref_m) or (t == 'T' and d in x.pref_t) else 1, x.horas, x.conteo[t]))
+                el = cands[0]
+                grilla[f][t] = el.nombre
+                el.horas += 9
+                el.conteo[t] += 1
+    
+    st.session_state.update({"grilla": pd.DataFrame(grilla).T, "calculado": True})
+    st.rerun()
+
+if st.session_state.get("calculado"):
+    st.table(st.session_state["grilla"])
+    st.download_button("📥 Descargar PDF", data=generar_pdf(st.session_state["grilla"], None, limite_input, mes, 2026), file_name="cronograma.pdf", mime="application/pdf")
