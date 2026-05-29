@@ -26,8 +26,56 @@ class Agente:
         if bloq:
             self.bloqueos = {int(d.strip()) for d in bloq.split(',') if d.strip().isdigit()}
 
-# --- LÓGICA DE CÁLCULO ---
-def calcular_turnos(nombres, config, limite, mes, anio):
+def generar_pdf(df, resumen, mes, anio):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, f"Cronograma {calendar.month_name[mes]} {anio}", ln=True, align="C")
+    pdf.ln(10)
+    pdf.set_font("Arial", "", 8)
+    for i, row in df.iterrows():
+        pdf.cell(30, 7, f"{i.day}/{i.month}", 1)
+        pdf.cell(30, 7, str(row['Dia']), 1)
+        pdf.cell(45, 7, str(row['M']), 1)
+        pdf.cell(45, 7, str(row['T']), 1, ln=True)
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Resumen de Turnos", ln=True)
+    for col in ["Agente", "Turnos M", "Turnos T"]: pdf.cell(45, 7, col, 1)
+    pdf.ln()
+    for n, row in resumen.iterrows():
+        pdf.cell(45, 7, str(n), 1)
+        pdf.cell(45, 7, str(int(row['Turnos M'])), 1)
+        pdf.cell(45, 7, str(int(row['Turnos T'])), 1, ln=True)
+    buffer = BytesIO()
+    buffer.write(pdf.output())
+    buffer.seek(0)
+    return buffer
+
+st.title("🗓️ Planificador de Turnos SMN")
+fecha_sel = st.date_input("Seleccionar mes", date(2026, 6, 1))
+mes, anio = fecha_sel.month, fecha_sel.year
+
+st.subheader(f"Calendario: {calendar.month_name[mes]}")
+cal = calendar.HTMLCalendar(firstweekday=0)
+st.markdown(cal.formatmonth(anio, mes), unsafe_allow_html=True)
+
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    limite = st.number_input("Límite Horas Mensuales", value=130)
+    nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
+    config = {}
+    for nom in nombres:
+        with st.expander(f"Agente: {nom}"):
+            config[nom] = {
+                'dm': st.multiselect("Mañana", ["Lu","Ma","Mi","Ju","Vi","Sá","Do"], default=["Lu","Ma","Mi","Ju","Vi"], key=f"m_{nom}"),
+                'dt': st.multiselect("Tarde", ["Lu","Ma","Mi","Ju","Vi","Sá","Do"], default=["Lu","Ma","Mi","Ju","Vi"], key=f"t_{nom}"),
+                'pm': st.multiselect("Pref M", list(range(1, 32)), key=f"pm_{nom}"),
+                'pt': st.multiselect("Pref T", list(range(1, 32)), key=f"pt_{nom}"),
+                'bloq': st.text_input("Días NO trabajar (ej: 5, 12)", key=f"b_{nom}")
+            }
+
+if st.sidebar.button("📊 Calcular Turnos"):
     agentes = {n: Agente(n, limite) for n in nombres}
     for n, c in config.items(): agentes[n].configurar(c['dm'], c['dt'], c['pm'], c['pt'], c['bloq'])
     
@@ -37,48 +85,35 @@ def calcular_turnos(nombres, config, limite, mes, anio):
     for d in range(1, dias_tot + 1):
         f = date(anio, mes, d)
         for t in ['M', 'T']:
-            # 1. Candidatos válidos (respetan límites, bloqueos y disponibilidad semanal)
+            # Filtro de candidatos aptos
             cands = [a for a in agentes.values() if a.horas + 9 <= a.lim and d not in a.bloqueos and (t=='M' and f.weekday() in a.disp_m or t=='T' and f.weekday() in a.disp_t)]
             
-            # 2. Si no hay candidatos, FORZAR al que menos turnos tenga (ignorar disponibilidad para no dejar hueco)
-            if not cands:
-                cands = list(agentes.values())
+            # Garantía de cobertura: si no hay nadie, forzar a todos los agentes
+            if not cands: cands = list(agentes.values())
 
-            # 3. Ordenar: 1. Total turnos (Equidad), 2. Preferencia, 3. Horas
-            cands.sort(key=lambda x: (x.conteo['M'] + x.conteo['T'], 0 if (t=='M' and d in x.pref_m) or (t=='T' and d in x.pref_t) else 1, x.horas))
+            # Criterio de ordenación equitativa:
+            cands.sort(key=lambda x: (
+                x.conteo[t], # 1. Menos turnos en este horario específico (balance M/T)
+                x.conteo['M'] + x.conteo['T'], # 2. Menos turnos totales (Equidad total)
+                0 if (t=='M' and d in x.pref_m) or (t=='T' and d in x.pref_t) else 1, # 3. Preferencia
+                x.horas # 4. Horas como desempate final
+            ))
             
             el = cands[0]
             grilla[f][t] = el.nombre
             el.horas += 9
             el.conteo[t] += 1
-            
-    return grilla, agentes
-
-# --- INTERFAZ ---
-st.title("🗓️ Planificador de Turnos (Equidad Garantizada)")
-fecha_sel = st.date_input("Seleccionar mes", date(2026, 6, 1))
-mes, anio = fecha_sel.month, fecha_sel.year
-
-with st.sidebar:
-    st.header("⚙️ Configuración")
-    limite = st.number_input("Límite Horas", value=130)
-    nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
-    config = {n: {} for n in nombres}
-    for nom in nombres:
-        with st.expander(f"Agente: {nom}"):
-            config[nom] = {
-                'dm': st.multiselect("Mañana", ["Lu","Ma","Mi","Ju","Vi","Sá","Do"], default=["Lu","Ma","Mi","Ju","Vi"], key=f"m_{nom}"),
-                'dt': st.multiselect("Tarde", ["Lu","Ma","Mi","Ju","Vi","Sá","Do"], default=["Lu","Ma","Mi","Ju","Vi"], key=f"t_{nom}"),
-                'pm': st.multiselect("Pref M", list(range(1, 32)), key=f"pm_{nom}"),
-                'pt': st.multiselect("Pref T", list(range(1, 32)), key=f"pt_{nom}"),
-                'bloq': st.text_input("Días NO trabajar", key=f"b_{nom}")
-            }
-
-if st.sidebar.button("📊 Calcular Turnos"):
-    grilla, agentes = calcular_turnos(nombres, config, limite, mes, anio)
-    st.session_state.update({"grilla": pd.DataFrame(grilla).T, "resumen": pd.DataFrame({n: {'Turnos M': a.conteo['M'], 'Turnos T': a.conteo['T']} for n, a in agentes.items()}).T, "calculado": True})
+    
+    st.session_state.update({
+        "grilla": pd.DataFrame(grilla).T, 
+        "resumen": pd.DataFrame({n: {'Turnos M': a.conteo['M'], 'Turnos T': a.conteo['T']} for n, a in agentes.items()}).T, 
+        "calculado": True
+    })
     st.rerun()
 
 if st.session_state.get("calculado"):
+    st.subheader("📋 Grilla Asignada")
     st.table(st.session_state.grilla)
+    st.subheader("📊 Resumen de Turnos por Agente")
     st.table(st.session_state.resumen)
+    st.
