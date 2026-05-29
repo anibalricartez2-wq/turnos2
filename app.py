@@ -5,7 +5,7 @@ from datetime import date
 from fpdf import FPDF
 from io import BytesIO
 
-st.set_page_config(page_title="Planificador SMN Pro", layout="wide")
+st.set_page_config(page_title="Planificador SMN", layout="wide")
 
 class Agente:
     def __init__(self, nombre, lim):
@@ -56,13 +56,9 @@ st.title("🗓️ Planificador de Turnos SMN")
 fecha_sel = st.date_input("Seleccionar mes", date(2026, 6, 1))
 mes, anio = fecha_sel.month, fecha_sel.year
 
-st.subheader(f"Calendario: {calendar.month_name[mes]}")
-cal = calendar.HTMLCalendar(firstweekday=0)
-st.markdown(cal.formatmonth(anio, mes), unsafe_allow_html=True)
-
 with st.sidebar:
     st.header("⚙️ Configuración")
-    limite = st.number_input("Límite Horas Mensuales", value=130)
+    limite = st.number_input("Límite Horas", value=130)
     nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
     config = {}
     for nom in nombres:
@@ -85,35 +81,6 @@ if st.sidebar.button("📊 Calcular Turnos"):
     for d in range(1, dias_tot + 1):
         f = date(anio, mes, d)
         for t in ['M', 'T']:
-            # Filtro de candidatos aptos
             cands = [a for a in agentes.values() if a.horas + 9 <= a.lim and d not in a.bloqueos and (t=='M' and f.weekday() in a.disp_m or t=='T' and f.weekday() in a.disp_t)]
-            
-            # Garantía de cobertura: si no hay nadie, forzar a todos los agentes
             if not cands: cands = list(agentes.values())
-
-            # Criterio de ordenación equitativa:
-            cands.sort(key=lambda x: (
-                x.conteo[t], # 1. Menos turnos en este horario específico (balance M/T)
-                x.conteo['M'] + x.conteo['T'], # 2. Menos turnos totales (Equidad total)
-                0 if (t=='M' and d in x.pref_m) or (t=='T' and d in x.pref_t) else 1, # 3. Preferencia
-                x.horas # 4. Horas como desempate final
-            ))
-            
-            el = cands[0]
-            grilla[f][t] = el.nombre
-            el.horas += 9
-            el.conteo[t] += 1
-    
-    st.session_state.update({
-        "grilla": pd.DataFrame(grilla).T, 
-        "resumen": pd.DataFrame({n: {'Turnos M': a.conteo['M'], 'Turnos T': a.conteo['T']} for n, a in agentes.items()}).T, 
-        "calculado": True
-    })
-    st.rerun()
-
-if st.session_state.get("calculado"):
-    st.subheader("📋 Grilla Asignada")
-    st.table(st.session_state.grilla)
-    st.subheader("📊 Resumen de Turnos por Agente")
-    st.table(st.session_state.resumen)
-    st.
+            cands.sort(key=lambda x: (x.conteo[t], x.conteo['M'] + x.conteo['T'], 0 if (t=='M' and d in x.pref_m) or (t=='T' and d in x.pref_
