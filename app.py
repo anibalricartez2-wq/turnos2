@@ -17,7 +17,7 @@ class Agente:
         self.horas = 0
         self.conteo = {'M': 0, 'T': 0}
         self.bloqueos = set()
-        self.pref_m, self.pref_t = set(), set() # Preferencias para M y T
+        self.pref_m, self.pref_t = set(), set()
         self.disp_m, self.disp_t = set(range(7)), set(range(7))
 
     def configurar(self, d_m, d_t, p_m, p_t):
@@ -36,7 +36,6 @@ class Agente:
         if t == 'T' and ds not in self.disp_t: return False
         return True
 
-# --- UI ---
 st.title("🗓️ Planificador de Turnos SMN")
 nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
 lista_dias = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
@@ -44,7 +43,7 @@ config = {}
 
 st.sidebar.header("⚙️ Configuración")
 mes = st.sidebar.slider("Mes", 1, 12, 6)
-limite_input = st.sidebar.number_input("Límite Horas", 130)
+limite_input = st.sidebar.number_input("Límite Horas Mensuales", min_value=80, max_value=200, value=130)
 
 for nom in nombres:
     with st.sidebar.expander(f"Agente: {nom}"):
@@ -53,10 +52,11 @@ for nom in nombres:
             'dt': st.multiselect("Tarde (Semana)", lista_dias, default=lista_dias, key=f"t_{nom}"),
             'pref_m': st.multiselect("Pref. Mañana (Días del mes)", list(range(1, 32)), key=f"pm_{nom}"),
             'pref_t': st.multiselect("Pref. Tarde (Días del mes)", list(range(1, 32)), key=f"pt_{nom}"),
-            'bloq': st.text_input("Bloqueos", key=f"b_{nom}")
+            'bloq': st.text_input("Bloqueos (ej: 1, 15)", key=f"b_{nom}")
         }
 
-if st.sidebar.button("📊 Calcular"):
+if st.sidebar.button("📊 Calcular Turnos"):
+    # REINSTANCIAMOS CON EL LIMITE CORRECTO
     agentes = {n: Agente(n, limite_input) for n in nombres}
     for n, c in config.items():
         agentes[n].configurar(c['dm'], c['dt'], c['pref_m'], c['pref_t'])
@@ -72,7 +72,7 @@ if st.sidebar.button("📊 Calcular"):
         for t in ['M', 'T']:
             cands = [a for a in agentes.values() if a.esta_disponible(f, t, grilla)]
             if cands:
-                # Prioridad mejorada: Preferencia (0) > Horas > Conteo
+                # Prioridad: 1. Preferencia (0), 2. Horas acumuladas, 3. Conteo de turnos
                 cands.sort(key=lambda x: (
                     0 if (t == 'M' and d in x.pref_m) or (t == 'T' and d in x.pref_t) else 1, 
                     x.horas, 
