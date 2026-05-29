@@ -72,6 +72,17 @@ lista_dias = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
 st.sidebar.header("⚙️ Configuración")
 mes = st.sidebar.slider("Mes", 1, 12, 6)
 limite_input = st.sidebar.number_input("Límite Horas Mensuales", value=130)
+# --- CALENDARIO VISUAL ---
+st.sidebar.subheader(f"Vista previa: Mes {mes}")
+_, dias_mes = calendar.monthrange(2026, mes)
+cal_data = []
+for d in range(1, dias_mes + 1):
+    f = date(2026, mes, d)
+    dia_nombre = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"][f.weekday()]
+    cal_data.append(f"{d} ({dia_nombre})")
+
+# Mostramos el calendario en la barra lateral en formato de grilla compacta
+st.sidebar.write(", ".join(cal_data))
 
 config = {}
 for nom in nombres:
