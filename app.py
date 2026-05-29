@@ -7,11 +7,9 @@ from io import BytesIO
 
 st.set_page_config(page_title="Planificador Pro", layout="wide")
 
-# --- INICIALIZACIÓN ---
 if "calculado" not in st.session_state:
     st.session_state.update({"calculado": False, "grilla": None, "resumen": None})
 
-# --- MOTOR ---
 class Agente:
     def __init__(self, nombre, lim):
         self.nombre = nombre
@@ -38,7 +36,6 @@ class Agente:
         if t == 'T' and ds not in self.disp_t: return False
         return True
 
-# --- PDF ---
 def generar_pdf(df, resumen, limite, mes, anio):
     pdf = FPDF()
     pdf.add_page()
@@ -47,9 +44,11 @@ def generar_pdf(df, resumen, limite, mes, anio):
     pdf.set_font("Arial", "B", 16)
     pdf.cell(0, 10, f"Cronograma {mes}/{anio} (Limite: {limite}hs)", ln=True, align="C")
     pdf.ln(10)
-    # Tabla Grilla
+    
+    # Tabla Principal
     pdf.set_font("Arial", "B", 8)
-    for col in ["Fecha", "Dia", "Manana", "Tarde"]: pdf.cell(45, 7, col, 1, 0, 'C')
+    for col in ["Fecha", "Dia", "Manana", "Tarde"]:
+        pdf.cell(45, 7, col, 1, 0, 'C')
     pdf.ln()
     pdf.set_font("Arial", "", 8)
     for i, row in df.iterrows():
@@ -57,16 +56,34 @@ def generar_pdf(df, resumen, limite, mes, anio):
         pdf.cell(45, 7, str(row['Dia']), 1)
         pdf.cell(45, 7, str(row['M']), 1)
         pdf.cell(45, 7, str(row['T']), 1, ln=True)
+        
     # Tabla Resumen
     pdf.add_page()
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 10, "Resumen de Turnos por Agente", ln=True)
     pdf.ln(5)
     pdf.set_font("Arial", "B", 10)
-    for col in ["Agente", "Horas", "Turnos M", "Turnos T"]: pdf.cell(45, 7, col, 1)
+    for col in ["Agente", "Horas", "Turnos M", "Turnos T"]:
+        pdf.cell(45, 7, col, 1)
     pdf.ln()
     pdf.set_font("Arial", "", 10)
     for n, row in resumen.iterrows():
         pdf.cell(45, 7, str(n), 1)
         pdf.cell(45, 7, str(row['Horas']), 1)
-        pdf.cell(45
+        pdf.cell(45, 7, str(row['Turnos M']), 1)
+        pdf.cell(45, 7, str(row['Turnos T']), 1, ln=True)
+        
+    buffer = BytesIO()
+    buffer.write(pdf.output())
+    buffer.seek(0)
+    return buffer
+
+# --- UI ---
+st.title("🗓️ Planificador de Turnos SMN")
+nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
+lista_dias = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
+config = {}
+
+st.sidebar.header("⚙️ Configuración")
+mes = st.sidebar.slider("Mes", 1, 12, 6)
+limite_input = st.sidebar.number_input("Límite Horas Mensuales", min_value=80, max_value
