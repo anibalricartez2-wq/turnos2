@@ -1,34 +1,98 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from fpdf import FPDF
 from io import BytesIO
 
-# Configuración básica de página
-st.set_page_config(page_title="Planificador", layout="wide")
+st.set_page_config(page_title="Planificador SMN", layout="wide")
 
-st.title("Planificador de Turnos")
-
-# Si no carga nada, el problema suele estar en la configuración inicial
-# Vamos a imprimir algo simple para verificar que el código corre
-st.write("Cargando sistema...")
-
-# Definición de la clase simple
+# --- MOTOR ---
 class Agente:
-    def __init__(self, nombre):
+    def __init__(self, nombre, lim):
         self.nombre = nombre
+        self.lim = lim
         self.horas = 0
         self.conteo = {'M': 0, 'T': 0}
+        self.bloqueos = set()
+        self.pref_m, self.pref_t = set(), set()
+        self.disp_m, self.disp_t = set(range(7)), set(range(7))
 
-# UI Simple para probar si carga
-nombres = ["Sanchez", "Barros", "Garcia"]
+    def configurar(self, d_m, d_t, p_m, p_t):
+        mapa = {"Lu":0, "Ma":1, "Mi":2, "Ju":3, "Vi":4, "Sá":5, "Do":6}
+        self.disp_m = {mapa[d] for d in d_m}
+        self.disp_t = {mapa[d] for d in d_t}
+        self.pref_m = {int(d) for d in p_m}
+        self.pref_t = {int(d) for d in p_t}
+
+# --- PDF ---
+def generar_pdf(df, resumen, limite, mes, anio):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, f"Cronograma {mes}/{anio}", ln=True, align="C")
+    pdf.ln(10)
+    pdf.set_font("Arial", "", 8)
+    # Tabla
+    for i, row in df.iterrows():
+        pdf.cell(45, 7, f"{i.day}/{i.month}", 1)
+        pdf.cell(45, 7, str(row['Dia']), 1)
+        pdf.cell(45, 7, str(row['M']), 1)
+        pdf.cell(45, 7, str(row['T']), 1, ln=True)
+    buffer = BytesIO()
+    buffer.write(pdf.output())
+    buffer.seek(0)
+    return buffer
+
+# --- UI ---
+st.title("🗓️ Planificador de Turnos SMN")
+
+# Selección de fecha visual
+fecha_seleccionada = st.date_input("Seleccionar mes de trabajo", date(2026, 6, 1))
+mes = fecha_seleccionada.month
+anio = fecha_seleccionada.year
+
+# Mostrar calendario visual del mes seleccionado
+st.subheader(f"Vista del mes: {calendar.month_name[mes]} {anio}")
+cal = calendar.HTMLCalendar(firstweekday=0)
+st.markdown(cal.formatmonth(anio, mes), unsafe_allow_html=True)
+
+st.sidebar.header("⚙️ Configuración Agentes")
+limite_input = st.sidebar.number_input("Límite Horas", value=130)
+nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
 config = {}
-for nom in nombres:
-    config[nom] = st.sidebar.text_input(f"Prueba {nom}", value="Test")
 
-if st.sidebar.button("Probar Carga"):
-    st.success("¡El código está corriendo correctamente!")
-    st.write(config)
-else:
-    st.info("Configurá los nombres y presioná 'Probar Carga' para verificar.")
+for nom in nombres:
+    with st.sidebar.expander(f"Agente: {nom}"):
+        config[nom] = {
+            'dm': st.multiselect("Mañana", ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"], default=["Lu", "Ma", "Mi", "Ju", "Vi"], key=f"m_{nom}"),
+            'dt': st.multiselect("Tarde", ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"], default=["Lu", "Ma", "Mi", "Ju", "Vi"], key=f"t_{nom}"),
+            'pm': st.multiselect("Pref. M", list(range(1, 32)), key=f"pm_{nom}"),
+            'pt': st.multiselect("Pref. T", list(range(1, 32)), key=f"pt_{nom}")
+        }
+
+if st.sidebar.button("📊 Calcular"):
+    agentes = {n: Agente(n, limite_input) for n in nombres}
+    for n, c in config.items():
+        agentes[n].configurar(c['dm'], c['dt'], c['pm'], c['pt'])
+    
+    # Cálculo
+    dias_totales = calendar.monthrange(anio, mes)[1]
+    grilla = {date(anio, mes, d): {'Dia': ["Lu","Ma","Mi","Ju","Vi","Sá","Do"][date(anio, mes, d).weekday()], 'M': 'SIN CUBRIR', 'T': 'SIN CUBRIR'} for d in range(1, dias_totales + 1)}
+    
+    for d in range(1, dias_totales + 1):
+        f = date(anio, mes, d)
+        for t in ['M', 'T']:
+            cands = [a for a in agentes.values() if a.horas + 9 <= a.lim]
+            if cands:
+                cands.sort(key=lambda x: (0 if (t == 'M' and d in x.pref_m) or (t == 'T' and d in x.pref_t) else 1, x.horas))
+                el = cands[0]
+                grilla[f][t] = el.nombre
+                el.horas += 9
+    
+    st.session_state.update({"grilla": pd.DataFrame(grilla).T, "calculado": True})
+    st.rerun()
+
+if st.session_state.get("calculado"):
+    st.table(st.session_state["grilla"])
+    st.download_button("📥 Descargar PDF", data=generar_pdf(st.session_state["grilla"], None, limite_input, mes, anio), file_name="cronograma.pdf", mime="application/pdf")
