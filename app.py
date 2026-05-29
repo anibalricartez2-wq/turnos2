@@ -62,4 +62,31 @@ mes, anio = fecha_sel.month, fecha_sel.year
 
 with st.sidebar:
     st.header("⚙️ Configuración")
-    limite = st.number_input("Límite Horas", value
+    limite = st.number_input("Límite Horas", min_value=0, max_value=500, value=130)
+    nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
+    config = {}
+    for nom in nombres:
+        with st.expander(f"Agente: {nom}"):
+            config[nom] = {
+                'dm': st.multiselect("Mañana", ["Lu","Ma","Mi","Ju","Vi","Sá","Do"], default=["Lu","Ma","Mi","Ju","Vi"], key=f"m_{nom}"),
+                'dt': st.multiselect("Tarde", ["Lu","Ma","Mi","Ju","Vi","Sá","Do"], default=["Lu","Ma","Mi","Ju","Vi"], key=f"t_{nom}"),
+                'pm': st.multiselect("Pref M", list(range(1, 32)), key=f"pm_{nom}"),
+                'pt': st.multiselect("Pref T", list(range(1, 32)), key=f"pt_{nom}"),
+                'bloq': st.text_input("Días NO trabajar (ej: 5, 12)", key=f"b_{nom}")
+            }
+
+if st.sidebar.button("📊 Calcular Turnos"):
+    agentes = {n: Agente(n, limite) for n in nombres}
+    for n, c in config.items(): agentes[n].configurar(c['dm'], c['dt'], c['pm'], c['pt'], c['bloq'])
+    
+    dias_tot = calendar.monthrange(anio, mes)[1]
+    grilla = {date(anio, mes, d): {'Dia': ["Lu","Ma","Mi","Ju","Vi","Sá","Do"][date(anio, mes, d).weekday()], 'M': 'SIN CUBRIR', 'T': 'SIN CUBRIR'} for d in range(1, dias_tot + 1)}
+    
+    for d in range(1, dias_tot + 1):
+        f = date(anio, mes, d)
+        for t in ['M', 'T']:
+            cands = [a for a in agentes.values() if a.horas + 9 <= a.lim and d not in a.bloqueos and (t=='M' and f.weekday() in a.disp_m or t=='T' and f.weekday() in a.disp_t)]
+            if not cands: cands = list(agentes.values())
+            cands.sort(key=lambda x: criterio_sort(x, t, d))
+            el = cands[0]
+            grilla[f][t] = el.
