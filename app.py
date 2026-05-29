@@ -28,7 +28,6 @@ class Agente:
 
 def generar_pdf(df, resumen, limite, mes, anio):
     pdf = FPDF()
-    # PÁGINA 1: GRILLA
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
     pdf.cell(0, 10, f"Cronograma {calendar.month_name[mes]} {anio}", ln=True, align="C")
@@ -42,12 +41,10 @@ def generar_pdf(df, resumen, limite, mes, anio):
         pdf.cell(45, 7, str(row['Dia']), 1)
         pdf.cell(45, 7, str(row['M']), 1)
         pdf.cell(45, 7, str(row['T']), 1, ln=True)
-    
-    # PÁGINA 2: RESUMEN
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, "Resumen de Turnos Asignados", ln=True, align="C")
-    pdf.ln(10)
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Resumen de Asignaciones", ln=True, align="C")
+    pdf.ln(5)
     pdf.set_font("Arial", "B", 10)
     for col in ["Agente", "Horas", "Turnos M", "Turnos T"]: pdf.cell(45, 7, col, 1)
     pdf.ln()
@@ -57,7 +54,6 @@ def generar_pdf(df, resumen, limite, mes, anio):
         pdf.cell(45, 7, str(int(row['Horas'])), 1)
         pdf.cell(45, 7, str(int(row['Turnos M'])), 1)
         pdf.cell(45, 7, str(int(row['Turnos T'])), 1, ln=True)
-    
     buffer = BytesIO()
     buffer.write(pdf.output())
     buffer.seek(0)
@@ -71,7 +67,6 @@ st.subheader(f"Calendario: {calendar.month_name[mes]}")
 cal = calendar.HTMLCalendar(firstweekday=0)
 st.markdown(cal.formatmonth(anio, mes), unsafe_allow_html=True)
 
-# Configuración
 nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
 config = {}
 with st.sidebar:
@@ -98,4 +93,23 @@ if st.sidebar.button("📊 Calcular"):
         for t in ['M', 'T']:
             cands = [a for a in agentes.values() if a.horas + 9 <= a.lim and (t=='M' and f.weekday() in a.disp_m or t=='T' and f.weekday() in a.disp_t)]
             if cands:
-                cands.sort(key=lambda x: (0 if (t=='M' and d in x.pref_m) or (t=='T' and
+                # Lógica simplificada para evitar errores de sintaxis
+                cands.sort(key=lambda x: (0 if (t=='M' and d in x.pref_m) or (t=='T' and d in x.pref_t) else 1, x.horas))
+                el = cands[0]
+                grilla[f][t] = el.nombre
+                el.horas += 9
+                el.conteo[t] += 1
+    
+    st.session_state.update({
+        "grilla": pd.DataFrame(grilla).T,
+        "resumen": pd.DataFrame({n: {'Horas': a.horas, 'Turnos M': a.conteo['M'], 'Turnos T': a.conteo['T']} for n, a in agentes.items()}).T,
+        "calculado": True
+    })
+    st.rerun()
+
+if st.session_state.get("calculado"):
+    st.subheader("📋 Grilla Asignada")
+    st.table(st.session_state["grilla"])
+    st.subheader("📊 Resumen")
+    st.table(st.session_state["resumen"])
+    st.download_button("📥 Descargar PDF", data=generar_pdf(st.session_state["grilla"], st.session_state["resumen"], limite, mes, anio), file_name="cronograma.pdf", mime="application/pdf")
