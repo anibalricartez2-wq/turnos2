@@ -1,16 +1,13 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from fpdf import FPDF
 from io import BytesIO
 
 st.set_page_config(page_title="Planificador SMN", layout="wide")
 
-# Inicialización
-if "calculado" not in st.session_state:
-    st.session_state.update({"calculado": False, "grilla": None, "resumen": None})
-
+# --- MOTOR ---
 class Agente:
     def __init__(self, nombre, lim):
         self.nombre = nombre
@@ -28,103 +25,74 @@ class Agente:
         self.pref_m = {int(d) for d in p_m}
         self.pref_t = {int(d) for d in p_t}
 
+# --- PDF ---
 def generar_pdf(df, resumen, limite, mes, anio):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"Cronograma {mes}/{anio} - Límite: {limite}hs", ln=True, align="C")
+    pdf.cell(0, 10, f"Cronograma {mes}/{anio}", ln=True, align="C")
     pdf.ln(10)
-    
-    # Tabla
-    pdf.set_font("Arial", "B", 8)
-    for col in ["Fecha", "Día", "Mañana", "Tarde"]:
-        pdf.cell(45, 7, col, 1, 0, 'C')
-    pdf.ln()
     pdf.set_font("Arial", "", 8)
+    # Tabla
     for i, row in df.iterrows():
-        pdf.cell(45, 7, str(i), 1)
+        pdf.cell(45, 7, f"{i.day}/{i.month}", 1)
         pdf.cell(45, 7, str(row['Dia']), 1)
         pdf.cell(45, 7, str(row['M']), 1)
         pdf.cell(45, 7, str(row['T']), 1, ln=True)
-        
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Resumen por Agente", ln=True)
-    pdf.ln(5)
-    for col in ["Agente", "Horas", "Turnos M", "Turnos T"]:
-        pdf.cell(45, 7, col, 1)
-    pdf.ln()
-    for n, row in resumen.iterrows():
-        pdf.cell(45, 7, str(n), 1)
-        pdf.cell(45, 7, str(row['Horas']), 1)
-        pdf.cell(45, 7, str(row['Turnos M']), 1)
-        pdf.cell(45, 7, str(row['Turnos T']), 1, ln=True)
-    
     buffer = BytesIO()
     buffer.write(pdf.output())
     buffer.seek(0)
     return buffer
 
+# --- UI ---
 st.title("🗓️ Planificador de Turnos SMN")
+
+# Selección de fecha visual
+fecha_seleccionada = st.date_input("Seleccionar mes de trabajo", date(2026, 6, 1))
+mes = fecha_seleccionada.month
+anio = fecha_seleccionada.year
+
+# Mostrar calendario visual del mes seleccionado
+st.subheader(f"Vista del mes: {calendar.month_name[mes]} {anio}")
+cal = calendar.HTMLCalendar(firstweekday=0)
+st.markdown(cal.formatmonth(anio, mes), unsafe_allow_html=True)
+
+st.sidebar.header("⚙️ Configuración Agentes")
+limite_input = st.sidebar.number_input("Límite Horas", value=130)
 nombres = ["Sanchez", "Barros", "Garcia", "Ricartez"]
-lista_dias = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
-
-st.sidebar.header("⚙️ Configuración")
-mes = st.sidebar.slider("Mes", 1, 12, 6)
-limite_input = st.sidebar.number_input("Límite Horas Mensuales", value=130)
-# --- CALENDARIO VISUAL ---
-st.sidebar.subheader(f"Vista previa: Mes {mes}")
-_, dias_mes = calendar.monthrange(2026, mes)
-cal_data = []
-for d in range(1, dias_mes + 1):
-    f = date(2026, mes, d)
-    dia_nombre = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"][f.weekday()]
-    cal_data.append(f"{d} ({dia_nombre})")
-
-# Mostramos el calendario en la barra lateral en formato de grilla compacta
-st.sidebar.write(", ".join(cal_data))
-
 config = {}
+
 for nom in nombres:
     with st.sidebar.expander(f"Agente: {nom}"):
         config[nom] = {
-            'dm': st.multiselect(f"Mañana {nom}", lista_dias, default=lista_dias, key=f"m_{nom}"),
-            'dt': st.multiselect(f"Tarde {nom}", lista_dias, default=lista_dias, key=f"t_{nom}"),
-            'pm': st.multiselect(f"Pref. M {nom}", list(range(1, 32)), key=f"pm_{nom}"),
-            'pt': st.multiselect(f"Pref. T {nom}", list(range(1, 32)), key=f"pt_{nom}"),
-            'bloq': st.text_input(f"Bloqueos {nom}", key=f"b_{nom}")
+            'dm': st.multiselect("Mañana", ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"], default=["Lu", "Ma", "Mi", "Ju", "Vi"], key=f"m_{nom}"),
+            'dt': st.multiselect("Tarde", ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"], default=["Lu", "Ma", "Mi", "Ju", "Vi"], key=f"t_{nom}"),
+            'pm': st.multiselect("Pref. M", list(range(1, 32)), key=f"pm_{nom}"),
+            'pt': st.multiselect("Pref. T", list(range(1, 32)), key=f"pt_{nom}")
         }
 
-if st.sidebar.button("📊 Calcular Turnos"):
+if st.sidebar.button("📊 Calcular"):
     agentes = {n: Agente(n, limite_input) for n in nombres}
     for n, c in config.items():
         agentes[n].configurar(c['dm'], c['dt'], c['pm'], c['pt'])
-        if c['bloq']:
-            for d in c['bloq'].split(','):
-                if d.strip().isdigit(): agentes[n].bloqueos.add(date(2026, mes, int(d.strip())))
     
-    _, dias_mes = calendar.monthrange(2026, mes)
-    grilla = {date(2026, mes, d): {'Dia': lista_dias[date(2026, mes, d).weekday()], 'M': 'SIN CUBRIR', 'T': 'SIN CUBRIR'} for d in range(1, dias_mes + 1)}
-        
-    for d in range(1, dias_mes + 1):
-        f = date(2026, mes, d)
+    # Cálculo
+    dias_totales = calendar.monthrange(anio, mes)[1]
+    grilla = {date(anio, mes, d): {'Dia': ["Lu","Ma","Mi","Ju","Vi","Sá","Do"][date(anio, mes, d).weekday()], 'M': 'SIN CUBRIR', 'T': 'SIN CUBRIR'} for d in range(1, dias_totales + 1)}
+    
+    for d in range(1, dias_totales + 1):
+        f = date(anio, mes, d)
         for t in ['M', 'T']:
-            cands = [a for a in agentes.values() if f not in a.bloqueos and (a.horas + 9 <= a.lim) and (t == 'M' and f.weekday() in a.disp_m or t == 'T' and f.weekday() in a.disp_t)]
+            cands = [a for a in agentes.values() if a.horas + 9 <= a.lim]
             if cands:
-                cands.sort(key=lambda x: (0 if (t == 'M' and d in x.pref_m) or (t == 'T' and d in x.pref_t) else 1, x.horas, x.conteo[t]))
+                cands.sort(key=lambda x: (0 if (t == 'M' and d in x.pref_m) or (t == 'T' and d in x.pref_t) else 1, x.horas))
                 el = cands[0]
                 grilla[f][t] = el.nombre
                 el.horas += 9
-                el.conteo[t] += 1
     
-    st.session_state.update({
-        "grilla": pd.DataFrame(grilla).T, 
-        "resumen": pd.DataFrame({n: {'Horas': a.horas, 'Turnos M': a.conteo['M'], 'Turnos T': a.conteo['T']} for n, a in agentes.items()}).T,
-        "calculado": True
-    })
+    st.session_state.update({"grilla": pd.DataFrame(grilla).T, "calculado": True})
     st.rerun()
 
 if st.session_state.get("calculado"):
     st.table(st.session_state["grilla"])
-    st.table(st.session_state["resumen"])
-    st.download_button("📥 Descargar PDF", data=generar_pdf(st.session_state["grilla"], st.session_state["resumen"], limite_input, mes, 2026), file_name="cronograma.pdf", mime="application/pdf")
+    st.download_button("📥 Descargar PDF", data=generar_pdf(st.session_state["grilla"], None, limite_input, mes, anio), file_name="cronograma.pdf", mime="application/pdf")
